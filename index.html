@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Artwork Catalogue</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+
+<style>
+  :root{
+    --paper:#f4f2ec;
+    --surface:#fcfbf8;
+    --ink:#242019;
+    --muted:#7a7266;
+    --line:#ddd7cc;
+    --accent:#31504a;
+    --mat:#efece4;
+    --maxw:1180px;
+  }
+  *{box-sizing:border-box;}
+  html{-webkit-text-size-adjust:100%;}
+  body{
+    margin:0; background:var(--paper); color:var(--ink);
+    font-family:"IBM Plex Sans", system-ui, sans-serif;
+    font-size:15px; line-height:1.5;
+  }
+  .wrap{max-width:var(--maxw); margin:0 auto; padding:0 24px;}
+
+  header.masthead{padding:44px 0 20px;}
+  .masthead h1{
+    font-family:"Spectral", Georgia, serif; font-weight:500;
+    font-size:clamp(28px, 4vw, 40px); letter-spacing:.2px;
+    margin:0 0 6px; line-height:1.1;
+  }
+  .masthead .sub{color:var(--muted); font-size:14px;}
+  .masthead .rule{height:1px; background:var(--line); margin:20px 0 0;}
+
+  .controls{display:flex; flex-wrap:wrap; gap:12px; align-items:center; padding:18px 0 8px;}
+  .controls .search{flex:1 1 260px; position:relative;}
+  .controls input[type="search"], .controls select{
+    width:100%; font:inherit; color:var(--ink); background:var(--surface);
+    border:1px solid var(--line); border-radius:2px; padding:10px 12px;
+  }
+  .controls select{width:auto; min-width:150px;}
+  .controls input:focus, .controls select:focus{outline:2px solid var(--accent); outline-offset:1px; border-color:var(--accent);}
+  .count{color:var(--muted); font-size:13px; margin-left:auto;}
+
+  .notice{
+    margin:14px 0 0; padding:10px 14px; border:1px solid var(--line);
+    border-left:3px solid var(--accent); background:var(--surface);
+    color:var(--ink); font-size:13.5px; border-radius:2px;
+  }
+  .notice.hidden{display:none;}
+
+  .grid{
+    display:grid; grid-template-columns:repeat(auto-fill, minmax(230px, 1fr));
+    gap:26px 22px; padding:26px 0 60px;
+  }
+  .card{background:var(--surface); border:1px solid var(--line); border-radius:2px; overflow:hidden; display:flex; flex-direction:column;}
+  .card .frame{background:var(--mat); padding:16px; display:flex; align-items:center; justify-content:center; min-height:180px;}
+  .card .frame img{max-width:100%; height:auto; display:block; box-shadow:0 1px 0 rgba(0,0,0,.04);}
+  .card .frame .missing{color:var(--muted); font-size:12.5px; text-align:center; padding:24px 8px;}
+  .card .body{padding:14px 15px 16px;}
+  .card .title{font-family:"Spectral", Georgia, serif; font-size:17px; font-weight:500; line-height:1.22; margin:0;}
+  .card .type{color:var(--muted); font-size:12.5px; margin:3px 0 10px;}
+  dl.meta{margin:0; display:grid; grid-template-columns:auto 1fr; gap:4px 12px;}
+  dl.meta dt{color:var(--muted); font-size:12px;}
+  dl.meta dd{margin:0; font-size:13px;}
+  .empty{grid-column:1 / -1; text-align:center; color:var(--muted); padding:60px 0; font-size:15px;}
+  footer.foot{border-top:1px solid var(--line); padding:22px 0 50px; color:var(--muted); font-size:12.5px;}
+
+  @media (max-width:560px){
+    .grid{grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); gap:18px 14px;}
+    .count{margin-left:0; width:100%;}
+  }
+  @media (prefers-reduced-motion:no-preference){
+    .grid{opacity:0; animation:fade .5s ease forwards;}
+    @keyframes fade{to{opacity:1;}}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead">
+    <h1 id="pageTitle">Artwork Catalogue</h1>
+    <div class="sub" id="pageSub"></div>
+    <div class="rule"></div>
+  </header>
+
+  <div class="controls">
+    <div class="search">
+      <input type="search" id="search" placeholder="Search by title, medium, subject…" aria-label="Search the catalogue">
+    </div>
+    <select id="typeFilter" aria-label="Filter by type"></select>
+    <span class="count" id="count"></span>
+  </div>
+
+  <div class="notice hidden" id="notice"></div>
+
+  <main class="grid" id="grid" aria-live="polite"></main>
+</div>
+
+<footer class="foot">
+  <div class="wrap" id="footNote"></div>
+</footer>
+
+<script>
+/* ============================================================
+   CONFIG  —  edit these values
+   ============================================================ */
+
+// Your PUBLISHED CSV link (already filled in).
+const SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vThQlNRe9c4thGPaDNLfMywOGAmZIPTYyDZQTmXvlWCFf_qzTia44vK5gmGbE9kyN0Dc0NstkuEpYMh/pub?gid=574718782&single=true&output=csv";
+
+// Where your thumbnails are served from (ends in a slash).
+const IMAGE_BASE = "https://cdn.jsdelivr.net/gh/rebeccacgray/art-catalog-images@main/";
+
+// Each image filename is built from the row's ID: images_th/<ID>_th.jpg
+const imageUrlForRow = (row) => IMAGE_BASE + "images_th/" + (row["ID"] || "").trim() + "_th.jpg";
+
+// Card heading, with a fallback if a row has no title.
+const HEADING_FIELD   = "Title / Description";
+const HEADING_FALLBACK = "ID";
+const SUBTITLE_FIELD  = "Type";
+
+// Detail rows under each card, in order. key = exact column header from your sheet.
+const FIELDS = [
+  { key: "ID",         label: "Catalogue no." },
+  { key: "Subject",    label: "Subject" },
+  { key: "Medium",     label: "Medium" },
+  { key: "Size HxW",   label: "Size" },
+  { key: "Fin. Date",  label: "Finished" },
+  { key: "Price",      label: "Price" },
+];
+
+// Column that drives the dropdown filter.
+const FILTER_FIELD = "Type";
+
+// Hide rows that have no title yet (skeleton entries still being filled in).
+const HIDE_ROWS_WITHOUT_TITLE = true;
+
+// Masthead title.
+const PAGE_TITLE = "Artwork Catalogue";
+
+/* ============================================================
+   Below here you should not need to change anything.
+   ============================================================ */
+
+const SAMPLE = [
+  { "ID":"AANIY001","Subject":"Portrait","Title / Description":"Aaniya 001 (Front View)",
+    "Type":"DRAWING","Medium":"Brown and White Pencil on Toned Paper","Size HxW":"14\" x 11\"",
+    "Fin. Date":"","Price":"$800.00" },
+  { "ID":"AANIY003","Subject":"Portrait","Title / Description":"Aaniya 003 with brick archway and cityscape",
+    "Type":"OIL","Medium":"Oil","Size HxW":"12\" x 16\"","Fin. Date":"","Price":"$2,500.00" },
+];
+
+let ALL = [];
+const $ = (id) => document.getElementById(id);
+
+document.title = PAGE_TITLE;
+$("pageTitle").textContent = PAGE_TITLE;
+
+function clean(v){ return (v == null ? "" : String(v)).trim(); }
+
+function cardFor(row){
+  const card = document.createElement("article");
+  card.className = "card";
+
+  const frame = document.createElement("div");
+  frame.className = "frame";
+  const img = document.createElement("img");
+  img.loading = "lazy";
+  img.alt = clean(row[HEADING_FIELD]) || clean(row[HEADING_FALLBACK]);
+  img.src = imageUrlForRow(row);
+  img.onerror = () => {
+    frame.innerHTML = '<div class="missing">Image not uploaded yet<br>' + clean(row["ID"]) + "_th.jpg</div>";
+  };
+  frame.appendChild(img);
+
+  const body = document.createElement("div");
+  body.className = "body";
+
+  const h = document.createElement("p");
+  h.className = "title";
+  h.textContent = clean(row[HEADING_FIELD]) || clean(row[HEADING_FALLBACK]);
+  body.appendChild(h);
+
+  const sub = clean(row[SUBTITLE_FIELD]);
+  if(sub){
+    const s = document.createElement("p");
+    s.className = "type";
+    s.textContent = sub;
+    body.appendChild(s);
+  }
+
+  const dl = document.createElement("dl");
+  dl.className = "meta";
+  FIELDS.forEach(f => {
+    const val = clean(row[f.key]);
+    if(!val) return;
+    const dt = document.createElement("dt"); dt.textContent = f.label;
+    const dd = document.createElement("dd"); dd.textContent = val;
+    dl.appendChild(dt); dl.appendChild(dd);
+  });
+  body.appendChild(dl);
+
+  card.appendChild(frame);
+  card.appendChild(body);
+  return card;
+}
+
+function render(rows){
+  const grid = $("grid");
+  grid.innerHTML = "";
+  if(!rows.length){
+    grid.innerHTML = '<p class="empty">No works match that search.</p>';
+  } else {
+    const frag = document.createDocumentFragment();
+    rows.forEach(r => frag.appendChild(cardFor(r)));
+    grid.appendChild(frag);
+  }
+  $("count").textContent = rows.length + (rows.length === 1 ? " work" : " works");
+}
+
+function applyFilters(){
+  const q = $("search").value.trim().toLowerCase();
+  const t = $("typeFilter").value;
+  const rows = ALL.filter(row => {
+    if(t && clean(row[FILTER_FIELD]) !== t) return false;
+    if(!q) return true;
+    const hay = [HEADING_FIELD, SUBTITLE_FIELD, ...FIELDS.map(f=>f.key)]
+      .map(k => clean(row[k])).join(" ").toLowerCase();
+    return hay.includes(q);
+  });
+  render(rows);
+}
+
+function buildTypeFilter(){
+  const sel = $("typeFilter");
+  const types = [...new Set(ALL.map(r => clean(r[FILTER_FIELD])).filter(Boolean))].sort();
+  sel.innerHTML = '<option value="">All ' + FILTER_FIELD.toLowerCase() + 's</option>';
+  types.forEach(t => {
+    const o = document.createElement("option");
+    o.value = t; o.textContent = t;
+    sel.appendChild(o);
+  });
+}
+
+function start(rows, isSample){
+  ALL = rows.filter(r => {
+    if(!clean(r["ID"])) return false;
+    if(HIDE_ROWS_WITHOUT_TITLE && !clean(r[HEADING_FIELD])) return false;
+    return true;
+  });
+  buildTypeFilter();
+  applyFilters();
+  const now = new Date();
+  $("pageSub").textContent = isSample ? "Preview" : "Loaded " + now.toLocaleDateString();
+  $("footNote").textContent = isSample
+    ? "Showing sample entries."
+    : "Reads live from your sheet. Edit the sheet, then reload this page to see changes.";
+  const notice = $("notice");
+  if(isSample){
+    notice.classList.remove("hidden");
+    notice.innerHTML = "Preview with sample entries. Set <strong>SHEET_CSV_URL</strong> to your published CSV link to go live.";
+  } else {
+    notice.classList.add("hidden");
+  }
+}
+
+function loadLive(){
+  Papa.parse(SHEET_CSV_URL, {
+    download:true, header:true, skipEmptyLines:true,
+    complete:(res) => {
+      if(!res.data || !res.data.length){ showError(); return; }
+      start(res.data, false);
+    },
+    error:showError
+  });
+}
+
+function showError(){
+  ALL = [];
+  render([]);
+  const notice = $("notice");
+  notice.classList.remove("hidden");
+  notice.innerHTML = "Couldn't read the sheet from here. If you opened this file directly from your computer, " +
+    "put it on GitHub Pages and open the web address instead. A local file cannot fetch web data.";
+  $("grid").innerHTML = '<p class="empty">Nothing to show yet.</p>';
+}
+
+$("search").addEventListener("input", applyFilters);
+$("typeFilter").addEventListener("change", applyFilters);
+
+if(SHEET_CSV_URL && SHEET_CSV_URL.trim()){
+  loadLive();
+} else {
+  start(SAMPLE, true);
+}
+</script>
+</body>
+</html>
